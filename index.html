@@ -339,7 +339,7 @@ box-shadow: var(--ombre);
 </button>
 </div>
 <div class="barre-jeu">
-<div class="theme">📖 Page 1 : Les animaux</div>
+<div class="theme" id="themeTitre">📖 Les animaux</div>
 <div class="compteur" id="compteur">0 / 5 mots trouvés</div>
 <button class="nouvelle" id="nouvelleGrille" type="button">🔄 Nouvelle grille</button>
 </div>
@@ -352,7 +352,7 @@ box-shadow: var(--ombre);
 <div class="message" id="message" aria-live="polite"></div>
 </div>
 <aside class="liste">
-<h2>Animaux à retrouver</h2>
+<h2 id="listeTitre">Mots à retrouver</h2>
 <ul class="mots" id="listeMots"></ul>
 </aside>
 </div>
@@ -377,7 +377,11 @@ box-shadow: var(--ombre);
 const API_URL = 'https://script.google.com/macros/s/AKfycbyh1LbQNETMy0GS7A5SzACTPMYlFEal9W3-XZozkwzIkAAUhlo_InN-5FOrI9eEqPoEeA/exec';
 const CLE_PROFIL = 'vitrineProfilActif';
 const CLE_ANONYME = 'lotoModeAnonyme';
-const MOTS = ['CHAT', 'CHIEN', 'LION', 'SOURIS', 'CHEVAL'];
+const MOTS_SECOURS = ['CHAT', 'CHIEN', 'LION', 'SOURIS', 'CHEVAL'];
+let MOTS = [...MOTS_SECOURS];
+let themeActuel = 'Les animaux';
+let pagesMots = [];
+let indexPage = 0;
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const CONFIG = {
 promenade: {
@@ -410,6 +414,77 @@ const overlayEl = document.getElementById('overlayVictoire');
 const creditEtatEl = document.getElementById('creditEtat');
 const profilNomEl = document.getElementById('profilNom');
 const profilSoldeEl = document.getElementById('profilSolde');
+const themeTitreEl = document.getElementById('themeTitre');
+const listeTitreEl = document.getElementById('listeTitre');
+
+function normaliserMot(valeur) {
+if (typeof valeur !== 'string') return '';
+return valeur
+.normalize('NFD')
+.replace(/[\u0300-\u036f]/g, '')
+.toUpperCase()
+.replace(/[^A-Z]/g, '');
+}
+function extrairePagesMots(data) {
+let sources = [];
+if (Array.isArray(data)) {
+if (data.every(item => typeof item === 'string')) {
+sources = [{ theme: 'Mots mélangés', mots: data }];
+} else {
+sources = data;
+}
+} else if (data && typeof data === 'object') {
+if (Array.isArray(data.pages)) sources = data.pages;
+else if (Array.isArray(data.listes)) sources = data.listes;
+else if (Array.isArray(data.themes)) sources = data.themes;
+else if (Array.isArray(data.mots)) sources = [{ theme: data.theme || data.titre || 'Mots mélangés', mots: data.mots }];
+else {
+sources = Object.entries(data).map(([theme, mots]) => ({ theme, mots }));
+}
+}
+return sources.map((source, i) => {
+const brut = Array.isArray(source) ? source : (source?.mots || source?.liste || source?.words || []);
+const mots = [...new Set(brut.map(normaliserMot).filter(mot => mot.length >= 2 && mot.length <= 10))];
+return {
+theme: String(source?.theme || source?.titre || source?.nom || `Page ${i + 1}`),
+mots
+};
+}).filter(page => page.mots.length >= 5);
+}
+async function chargerListesMots() {
+try {
+const reponse = await fetch('./listes-mots.json', { cache: 'no-store' });
+if (!reponse.ok) throw new Error(`Erreur HTTP ${reponse.status}`);
+const data = await reponse.json();
+pagesMots = extrairePagesMots(data);
+if (!pagesMots.length) throw new Error('Aucune liste valide de cinq mots minimum');
+choisirNouvellePage();
+messageEl.textContent = '';
+} catch (erreur) {
+console.warn('listes-mots.json non chargé, utilisation de la liste de secours :', erreur);
+pagesMots = [{ theme: 'Les animaux', mots: MOTS_SECOURS }];
+choisirNouvellePage();
+messageEl.textContent = 'La liste externe n’a pas pu être chargée : liste de secours utilisée.';
+}
+}
+function choisirNouvellePage() {
+if (!pagesMots.length) return;
+if (pagesMots.length > 1) {
+let prochain = indexPage;
+while (prochain === indexPage) prochain = Math.floor(Math.random() * pagesMots.length);
+indexPage = prochain;
+} else {
+indexPage = 0;
+}
+const page = pagesMots[indexPage];
+themeActuel = page.theme;
+const compatibles = page.mots.filter(mot => mot.length <= CONFIG[niveau].taille);
+const reservoir = compatibles.length >= 5 ? compatibles : page.mots;
+MOTS = melanger(reservoir).slice(0, 5);
+themeTitreEl.textContent = `📖 ${themeActuel}`;
+listeTitreEl.textContent = `${themeActuel} à retrouver`;
+}
+
 function entier(valeur) {
 const n = Number(valeur);
 return Number.isFinite(n) ? Math.trunc(n) : 0;
@@ -432,12 +507,12 @@ return;
 profilActif = lireProfil();
 if (!profilActif) {
 profilNomEl.textContent = 'Aucun profil';
-profilSoldeEl.textContent = '0 pièce d'or';
+profilSoldeEl.textContent = "0 pièce d'or";
 return;
 }
 const pieces = entier(profilActif.piecesOr ?? profilActif.solde);
 profilNomEl.textContent = profilActif.prenom || 'Joueur';
-profilSoldeEl.textContent = pieces + (pieces === 1 ? ' pièce d'or' : ' pièces d'or');
+profilSoldeEl.textContent = pieces + (pieces === 1 ? " pièce d'or" : " pièces d'or");
 }
 function melanger(tableau) {
 const t = [...tableau];
@@ -481,8 +556,15 @@ return true;
 }
 return false;
 }
-function genererPartie() {
+function genererPartie(changerPage = false) {
 const cfg = CONFIG[niveau];
+if (changerPage) choisirNouvellePage();
+else {
+const compatibles = pagesMots[indexPage]?.mots?.filter(mot => mot.length <= cfg.taille) || MOTS_SECOURS;
+MOTS = melanger(compatibles.length >= 5 ? compatibles : MOTS_SECOURS).slice(0, 5);
+themeTitreEl.textContent = `📖 ${themeActuel}`;
+listeTitreEl.textContent = `${themeActuel} à retrouver`;
+}
 taille = cfg.taille;
 gainTraite = false;
 motsTrouves = new Set();
@@ -502,7 +584,7 @@ return poserMot(mot, motPlace, inverse, melanger(cfg.directions));
 });
 }
 if (!reussi) {
-messageEl.textContent = 'La grille n'a pas pu être créée. Appuyez sur Nouvelle grille.';
+messageEl.textContent = "La grille n'a pas pu être créée. Appuyez sur Nouvelle grille.";
 return;
 }
 for (let l = 0; l < taille; l++) {
@@ -602,7 +684,7 @@ if (motsTrouves.size === MOTS.length) {
 setTimeout(terminerPartie, 450);
 }
 } else {
-messageEl.textContent = 'Ce mot n'est pas dans la liste. Essayez encore.';
+messageEl.textContent = "Ce mot n'est pas dans la liste. Essayez encore.";
 }
 effacerSelectionVisuelle();
 }
@@ -648,7 +730,7 @@ if (localStorage.getItem(clePartie) === '1') {
 creditEtatEl.textContent = 'Les 5 pièces ont déjà été créditées pour cette partie.';
 return;
 }
-creditEtatEl.textContent = 'Crédit des pièces d'or…';
+creditEtatEl.textContent = "Crédit des pièces d'or…";
 const payload = {
 action: 'gain',
 profilId: profilActif.id,
@@ -686,7 +768,7 @@ profilActif.solde = nouveauSolde;
 localStorage.setItem(CLE_PROFIL, JSON.stringify(profilActif));
 localStorage.setItem(clePartie, '1');
 afficherProfil();
-creditEtatEl.textContent = '✅ 5 pièces d'or ajoutées à votre solde.';
+creditEtatEl.textContent = "✅ 5 pièces d'or ajoutées à votre solde.";
 }
 function choisirNiveau(nouveauNiveau) {
 niveau = nouveauNiveau;
@@ -702,10 +784,10 @@ grilleEl.addEventListener('pointercancel', pointerFin);
 document.querySelectorAll('.niveau').forEach(btn => {
 btn.addEventListener('click', () => choisirNiveau(btn.dataset.niveau));
 });
-document.getElementById('nouvelleGrille').addEventListener('click', genererPartie);
-document.getElementById('rejouer').addEventListener('click', genererPartie);
+document.getElementById('nouvelleGrille').addEventListener('click', () => genererPartie(true));
+document.getElementById('rejouer').addEventListener('click', () => genererPartie(true));
 afficherProfil();
-genererPartie();
+chargerListesMots().then(() => genererPartie(false));
 </script>
 </body>
 </html>
