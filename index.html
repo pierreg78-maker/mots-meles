@@ -430,7 +430,20 @@
     const API_URL = 'https://script.google.com/macros/s/AKfycbyh1LbQNETMy0GS7A5SzACTPMYlFEal9W3-XZozkwzIkAAUhlo_InN-5FOrI9eEqPoEeA/exec';
     const CLE_PROFIL = 'vitrineProfilActif';
     const CLE_ANONYME = 'lotoModeAnonyme';
-    const MOTS = ['CHAT', 'CHIEN', 'LION', 'SOURIS', 'CHEVAL'];
+    let MOTS = ['CHAT', 'CHIEN', 'LION', 'SOURIS', 'CHEVAL'];
+
+async function chargerListes() {
+  try {
+    const reponse = await fetch('listes-mots.json');
+    if (!reponse.ok) throw new Error('Fichier non trouvé');
+    const data = await reponse.json();
+    const indexAleatoire = Math.floor(Math.random() * data.listes.length);
+    MOTS = data.listes[indexAleatoire];
+  } catch (erreur) {
+    console.warn('Listes non chargées, utilisation du défaut:', erreur);
+  }
+  genererPartie();
+}
     const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
     const CONFIG = {
@@ -814,7 +827,7 @@
     document.getElementById('rejouer').addEventListener('click', genererPartie);
 
     afficherProfil();
-    genererPartie();
+chargerListes();
   </script>
 </body>
 </html>
